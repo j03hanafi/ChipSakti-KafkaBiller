@@ -1,243 +1,165 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"io/ioutil"
+	"fmt"
 	"log"
-	"net/http"
-	"net/url"
 	"strconv"
+	"strings"
+
+	"github.com/mofax/iso8583"
 )
 
-// Return PPOB Inquiry response in JSON
-func responseJsonPPOBInquiry(jsonIso PPOBInquiryRequest) PPOBInquiryResponse {
-	var response PPOBInquiryResponse
+// Return JSON for PPOB Inquiry ISO message request
+func getJsonPPOBInquiry(parsedIso iso8583.IsoStruct) PPOBInquiryRequest {
+	var response PPOBInquiryRequest
 
-	// Client setup for custom http request
-	client := &http.Client{}
-	var baseURL = "https://chipsakti-mock.herokuapp.com"
+	log.Println("Converting PPOB Inquiry ISO8583 request to JSON")
 
-	// Set data to be encoded
-	var param = url.Values{}
-	param.Set("transaction_id", jsonIso.TransactionID)
-	param.Set("partner_id", jsonIso.PartnerID)
-	param.Set("product_code", jsonIso.ProductCode)
-	param.Set("customer_no", jsonIso.CustomerNo)
-	param.Set("periode", jsonIso.Periode)
-	param.Set("merchant_code", jsonIso.MerchantCode)
-	param.Set("request_time", jsonIso.RequestTime)
-	param.Set("signature", jsonIso.Signature)
+	request, _ := parsedIso.ToString()
+	log.Printf("PPOB Inquiry Request (ISO8583): %v\n", request)
 
-	log.Printf("Send request to https://chipsakti-mock.herokuapp.com/inquiry\n")
+	// Map ISO8583 format to JSON data
+	emap := parsedIso.Elements.GetElements()
+	response.TransactionID = strings.Trim(emap[48][0:25], " ")
+	response.PartnerID = strings.Trim(emap[48][25:41], " ")
+	response.ProductCode = strings.Trim(emap[48][41:57], " ")
+	response.CustomerNo = strings.Trim(emap[48][57:82], " ")
+	response.MerchantCode = strings.Trim(emap[48][82:107], " ")
+	response.RequestTime = strings.Trim(emap[48][107:126], " ")
+	response.Periode = strings.Trim(emap[48][126:], " ")
 
-	// Request to Biller
-	var payload = bytes.NewBufferString(param.Encode())
-	req, err := http.NewRequest("POST", baseURL+"/inquiry", payload)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if err != nil {
-		log.Fatalf("Failed to sent request to https://chipsakti-mock.herokuapp.com/inquiry. Error: %v\n", err)
-	}
+	// Create signature for new request
+	signature := fmt.Sprintf("$inquiry$%v$%v$%v$%v$unand$",
+		response.TransactionID, response.PartnerID, response.MerchantCode, response.RequestTime)
+	log.Println("Signature:", signature)
+	response.Signature = signatureSHA256(signature)
+	log.Println("Signature encrypted: ", response.Signature)
 
-	// Check response from Biller
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to get response from https://chipsakti-mock.herokuapp.com/inquiry. Error: %v\n", err)
-	}
-
-	defer resp.Body.Close()
-
-	log.Printf("Receive response from https://chipsakti-mock.herokuapp.com/inquiry\n")
-
-	// Read response from Biller
-	body, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(body, &response)
-
+	log.Println("Convert success")
+	log.Printf("PPOB Inquiry Request (JSON): %+v\n", response)
 	return response
 }
 
-// Return PPOB Payment response in JSON
-func responsePPOBPayment(jsonIso PPOBPaymentRequest) PPOBPaymentResponse {
-	var response PPOBPaymentResponse
+// Return JSON for PPOB Payment ISO message request
+func getJsonPPOBPayment(parsedIso iso8583.IsoStruct) PPOBPaymentRequest {
+	var response PPOBPaymentRequest
 
-	// Client setup for custom http request
-	client := &http.Client{}
-	var baseURL = "https://chipsakti-mock.herokuapp.com"
-	amount := strconv.Itoa(jsonIso.Amount)
+	log.Println("Converting PPOB Payment ISO8583 request to JSON")
 
-	// Set data to be encoded
-	var param = url.Values{}
-	param.Set("transaction_id", jsonIso.TransactionID)
-	param.Set("partner_id", jsonIso.PartnerID)
-	param.Set("product_code", jsonIso.ProductCode)
-	param.Set("customer_no", jsonIso.CustomerNo)
-	param.Set("reff_id", jsonIso.ReffID)
-	param.Set("amount", amount)
-	param.Set("merchant_code", jsonIso.MerchantCode)
-	param.Set("request_time", jsonIso.RequestTime)
-	param.Set("signature", jsonIso.Signature)
+	request, _ := parsedIso.ToString()
+	log.Printf("PPOB Payment Request (ISO8583): %v\n", request)
 
-	log.Printf("Send request to https://chipsakti-mock.herokuapp.com/payment\n")
+	// Map ISO8583 format to JSON data
+	emap := parsedIso.Elements.GetElements()
+	response.Amount, _ = strconv.Atoi(emap[4])
+	response.ReffID = strings.Trim(emap[37], " ")
+	response.TransactionID = strings.Trim(emap[48][0:25], " ")
+	response.PartnerID = strings.Trim(emap[48][25:41], " ")
+	response.ProductCode = strings.Trim(emap[48][41:57], " ")
+	response.CustomerNo = strings.Trim(emap[48][57:82], " ")
+	response.MerchantCode = strings.Trim(emap[48][82:107], " ")
+	response.RequestTime = strings.Trim(emap[48][107:126], " ")
 
-	// Request to Biller
-	var payload = bytes.NewBufferString(param.Encode())
-	req, err := http.NewRequest("POST", baseURL+"/payment", payload)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if err != nil {
-		log.Fatalf("Failed to sent request to https://chipsakti-mock.herokuapp.com/payment. Error: %v\n", err)
-	}
+	// Create signature for new request
+	signature := fmt.Sprintf("$payment$%v$%v$%v$%v$%v$unand$",
+		response.TransactionID, response.PartnerID, response.ReffID, response.MerchantCode, response.RequestTime)
+	log.Println("Signature: ", signature)
+	response.Signature = signatureSHA256(signature)
+	log.Println("Signature encrypted: ", response.Signature)
 
-	// Check response from Biller
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to get response from https://chipsakti-mock.herokuapp.com/payment. Error: %v\n", err)
-	}
-
-	defer resp.Body.Close()
-
-	log.Printf("Receive response from https://chipsakti-mock.herokuapp.com/payment\n")
-
-	// Read response from Biller
-	body, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(body, &response)
-
+	log.Println("Convert success")
+	log.Printf("PPOB Payment Request (JSON): %+v\n", response)
 	return response
 }
 
-// Return PPOB Status response in JSON
-func responsePPOBStatus(jsonIso PPOBStatusRequest) PPOBStatusResponse {
-	var response PPOBStatusResponse
+// Return JSON for Topup Buy ISO message request
+func getJsonTopupBuy(parsedIso iso8583.IsoStruct) TopupBuyRequest {
+	var response TopupBuyRequest
 
-	// Client setup for custom http request
-	client := &http.Client{}
-	var baseURL = "https://chipsakti-mock.herokuapp.com"
-	amount := strconv.Itoa(jsonIso.Amount)
+	log.Println("Converting Topup Buy ISO8583 request to JSON")
 
-	// Set data to be encoded
-	var param = url.Values{}
-	param.Set("transaction_id", jsonIso.TransactionID)
-	param.Set("partner_id", jsonIso.PartnerID)
-	param.Set("product_code", jsonIso.ProductCode)
-	param.Set("customer_no", jsonIso.CustomerNo)
-	param.Set("reff_id", jsonIso.ReffID)
-	param.Set("amount", amount)
-	param.Set("merchant_code", jsonIso.MerchantCode)
-	param.Set("request_time", jsonIso.RequestTime)
-	param.Set("signature", jsonIso.Signature)
+	request, _ := parsedIso.ToString()
+	log.Printf("Topup Buy Request (ISO8583): %v\n", request)
 
-	log.Printf("Send request to https://chipsakti-mock.herokuapp.com/status\n")
+	// Map ISO8583 format to JSON data
+	emap := parsedIso.Elements.GetElements()
+	response.TransactionID = strings.Trim(emap[48][0:25], " ")
+	response.PartnerID = strings.Trim(emap[48][25:41], " ")
+	response.ProductCode = strings.Trim(emap[48][41:57], " ")
+	response.CustomerNo = strings.Trim(emap[48][57:82], " ")
+	response.MerchantCode = strings.Trim(emap[48][82:107], " ")
+	response.RequestTime = strings.Trim(emap[48][107:126], " ")
 
-	// Request to Biller
-	var payload = bytes.NewBufferString(param.Encode())
-	req, err := http.NewRequest("POST", baseURL+"/status", payload)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if err != nil {
-		log.Fatalf("Failed to sent request to https://chipsakti-mock.herokuapp.com/status. Error: %v\n", err)
-	}
+	// Create signature for new request
+	signature := fmt.Sprintf("$buy$%v$%v$%v$%v$unand$",
+		response.TransactionID, response.PartnerID, response.MerchantCode, response.RequestTime)
+	log.Println("Signature: ", signature)
+	response.Signature = signatureSHA256(signature)
+	log.Println("Signature encrypted: ", response.Signature)
 
-	// Check response from Biller
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to get response from https://chipsakti-mock.herokuapp.com/status. Error: %v\n", err)
-	}
-
-	defer resp.Body.Close()
-
-	log.Printf("Receive response from https://chipsakti-mock.herokuapp.com/status\n")
-
-	// Read response from Biller
-	body, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(body, &response)
-
+	log.Println("Convert success")
+	log.Printf("Topup Buy Request (JSON): %+v\n", response)
 	return response
 }
 
-// Return Topup Buy response in JSON
-func responseTopupBuy(jsonIso TopupBuyRequest) TopupBuyResponse {
-	var response TopupBuyResponse
+// Return JSON for Topup Check ISO message request
+func getJsonTopupCheck(parsedIso iso8583.IsoStruct) TopupCheckRequest {
+	var response TopupCheckRequest
 
-	// Client setup for custom http request
-	client := &http.Client{}
-	var baseURL = "https://chipsakti-mock.herokuapp.com"
+	log.Println("Converting Topup Check ISO8583 request to JSON")
 
-	// Set data to be encoded
-	var param = url.Values{}
-	param.Set("transaction_id", jsonIso.TransactionID)
-	param.Set("partner_id", jsonIso.PartnerID)
-	param.Set("product_code", jsonIso.ProductCode)
-	param.Set("customer_no", jsonIso.CustomerNo)
-	param.Set("merchant_code", jsonIso.MerchantCode)
-	param.Set("request_time", jsonIso.RequestTime)
-	param.Set("signature", jsonIso.Signature)
+	request, _ := parsedIso.ToString()
+	log.Printf("Topup Check Request (ISO8583): %v\n", request)
 
-	log.Printf("Send request to https://chipsakti-mock.herokuapp.com/buy\n")
+	// Map ISO8583 format to JSON data
+	emap := parsedIso.Elements.GetElements()
+	response.TransactionID = strings.Trim(emap[48][0:25], " ")
+	response.PartnerID = strings.Trim(emap[48][25:41], " ")
+	response.ProductCode = strings.Trim(emap[48][41:57], " ")
+	response.CustomerNo = strings.Trim(emap[48][57:82], " ")
+	response.MerchantCode = strings.Trim(emap[48][82:107], " ")
+	response.RequestTime = strings.Trim(emap[48][107:126], " ")
 
-	// Request to Biller
-	var payload = bytes.NewBufferString(param.Encode())
-	req, err := http.NewRequest("POST", baseURL+"/buy", payload)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if err != nil {
-		log.Fatalf("Failed to sent request to https://chipsakti-mock.herokuapp.com/buy. Error: %v\n", err)
-	}
+	// Create signature for new request
+	signature := fmt.Sprintf("$check$%v$%v$%v$%v$unand$",
+		response.TransactionID, response.PartnerID, response.MerchantCode, response.RequestTime)
+	log.Println("Signature: ", signature)
+	response.Signature = signatureSHA256(signature)
+	log.Println("Signature encrypted: ", response.Signature)
 
-	// Check response from Biller
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to get response from https://chipsakti-mock.herokuapp.com/buy. Error: %v\n", err)
-	}
-
-	defer resp.Body.Close()
-
-	log.Printf("Receive response from https://chipsakti-mock.herokuapp.com/buy\n")
-
-	// Read response from Biller
-	body, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(body, &response)
-
+	log.Println("Convert success")
+	log.Printf("Topup Check Request (JSON): %+v\n", response)
 	return response
 }
 
-// Return Topup Check response in JSON
-func responseTopupCheck(jsonIso TopupCheckRequest) TopupCheckResponse {
-	var response TopupCheckResponse
+// Return JSON for PPOB Status ISO message request
+func getJsonPPOBStatus(parsedIso iso8583.IsoStruct) PPOBStatusRequest {
+	var response PPOBStatusRequest
 
-	// Client setup for custom http request
-	client := &http.Client{}
-	var baseURL = "https://chipsakti-mock.herokuapp.com"
+	log.Println("Converting PPOB Status ISO8583 request to JSON")
 
-	// Set data to be encoded
-	var param = url.Values{}
-	param.Set("transaction_id", jsonIso.TransactionID)
-	param.Set("partner_id", jsonIso.PartnerID)
-	param.Set("product_code", jsonIso.ProductCode)
-	param.Set("customer_no", jsonIso.CustomerNo)
-	param.Set("merchant_code", jsonIso.MerchantCode)
-	param.Set("request_time", jsonIso.RequestTime)
-	param.Set("signature", jsonIso.Signature)
+	request, _ := parsedIso.ToString()
+	log.Printf("PPOB Status Request (ISO8583): %v\n", request)
 
-	log.Printf("Request to https://chipsakti-mock.herokuapp.com/check\n")
+	// Map ISO8583 format to JSON data
+	emap := parsedIso.Elements.GetElements()
+	response.Amount, _ = strconv.Atoi(emap[4])
+	response.ReffID = strings.Trim(emap[37], " ")
+	response.TransactionID = strings.Trim(emap[48][0:25], " ")
+	response.PartnerID = strings.Trim(emap[48][25:41], " ")
+	response.ProductCode = strings.Trim(emap[48][41:57], " ")
+	response.CustomerNo = strings.Trim(emap[48][57:82], " ")
+	response.MerchantCode = strings.Trim(emap[48][82:107], " ")
+	response.RequestTime = strings.Trim(emap[48][107:126], " ")
 
-	// Request to Biller
-	var payload = bytes.NewBufferString(param.Encode())
-	req, err := http.NewRequest("POST", baseURL+"/check", payload)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if err != nil {
-		log.Fatalf("Failed to sent request to https://chipsakti-mock.herokuapp.com/check. Error: %v\n", err)
-	}
+	// Create signature for new request
+	signature := fmt.Sprintf("$status$%v$%v$%v$%v$%v$unand$",
+		response.TransactionID, response.PartnerID, response.ReffID, response.MerchantCode, response.RequestTime)
+	log.Println("Signature: ", signature)
+	response.Signature = signatureSHA256(signature)
+	log.Println("Signature encrypted: ", response.Signature)
 
-	// Check response from Biller
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Fatalf("Failed to get response from https://chipsakti-mock.herokuapp.com/check. Error: %v\n", err)
-	}
-
-	defer resp.Body.Close()
-
-	log.Printf("Receive response from https://chipsakti-mock.herokuapp.com/check\n")
-
-	// Read response from Biller
-	body, _ := ioutil.ReadAll(resp.Body)
-	json.Unmarshal(body, &response)
-
+	log.Println("Convert success")
+	log.Printf("PPOB Status Request (JSON): %+v\n", response)
 	return response
 }
